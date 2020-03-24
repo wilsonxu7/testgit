@@ -1,0 +1,337 @@
+ASIC期中作业
+
+11510356朱江瀚
+
+1，	设计文档及功能代码设计
+1)	Verilog代码：
+2)	代码中穿插的文字说明
+
+该代码的主要实现思路为为利用超前进位加法器（CLA）提前得到进位信息从而加快计算速度。
+在此基础上，考虑到一次直接进行过多位数的超前进位加法会导致过多的资源消耗，该代码采用了以4位超前进位加法器为基本的单元，然后将每4位的G，P值计算出来（cc模块）。
+获得每4位的等效G，P值后，将前16位（即前四个4位等效G，P值）的等效G，P计算出来，从而可以直接从C_in直接计算得到前16位的进位信息。
+再次利用计算等效超前进位G，P的方式，可以通过配合前16位的进位信息，将后16位每4位利用超前进位加法器计算出来结果。
+如果将每次的4位超前进位加法或者求等效G，P值视为一个计算周期，在后16位的计算中总共耗时3个计算周期。为了不影响加法器的总延时，试图将前16位的加法控制在3个周期之内。
+于是，前12位可以通过4位超前进位加法依次获得，13-16位可以通过前8位的进位信息和9-12位的等效G，P获得进位然后通过超前进位加法得到。
+代码如下，文字说明见英文注释：
+
+//-----------------------------------------------------------
+// FileName: adder32.v
+// Creator : Zhu Jianghan
+// Function: 32 bits full adder
+//-----------------------------------------------------------
+
+module add4(a,b,cin,s,co);//add4 is 4-bits CLA(Carry Lookahead Adder)
+input[3:0]a,b;
+input cin;
+output[3:0]s;
+output co;
+wire[3:0]c,g,p;
+assign g[0]=a[0]&b[0],g[1]=a[1]&b[1],g[2]=a[2]&b[2],g[3]=a[3]&b[3];//Generate
+assign p[0]=a[0]^b[0],p[1]=a[1]^b[1],p[2]=a[2]^b[2],p[3]=a[3]^b[3];//Propagate
+assign c[0]=g[0]|(p[0]&cin),
+       c[1]=g[1]|(p[1]&g[0])|(p[1]&p[0]&cin),
+       c[2]=g[2]|(p[2]&g[1])|(p[2]&p[1]&g[0])|(p[2]&p[1]&p[0]&cin),
+       c[3]=g[3]|(p[3]&g[2])|(p[3]&p[2]&g[1])|(p[3]&p[2]&p[1]&g[0])|(p[3]&p[2]&p[1]&p[0]&cin);
+assign s[3:0]=a[3:0]^b[3:0]^{c[3:0],cin};//sum
+assign co=c[3];
+endmodule
+
+
+module cc4(a,b,G,P);//cc4 can calculate G, P for 4 bits value
+input[3:0]a,b;
+output G;
+output P;
+wire[3:0]g,p;
+assign g[0]=a[0]&b[0],g[1]=a[1]&b[1],g[2]=a[2]&b[2],g[3]=a[3]&b[3];//Generate
+assign p[0]=a[0]^b[0],p[1]=a[1]^b[1],p[2]=a[2]^b[2],p[3]=a[3]^b[3];//Propagate
+assign G=g[3]|(p[3]&g[2])|(p[3]&p[2]&g[1])|(p[3]&p[2]&p[1]&g[0]);
+assign P=p[3]&p[2]&p[1]&p[0];
+endmodule
+
+
+module ccc2(g,p,G,P);//ccc2 can calcualte equivalent G, P from 2-bits g, p
+input[1:0]g,p;
+output G;
+output P;
+assign G=g[1]|(p[1]&g[0]);
+assign P=p[1]&p[0];
+endmodule
+
+
+module ccc3(g,p,G,P);//ccc2 can calcualte equivalent G, P from 3-bits g, p
+input[2:0]g,p;
+output G;
+output P;
+assign G=g[2]|(p[2]&g[1])|(p[2]&p[1]&g[0]);
+assign P=p[2]&p[1]&p[0];
+endmodule
+
+
+module ccc4(g,p,G,P);//ccc4 can calculate equivalent G, P from 4-bits g, p
+input[3:0]g,p;
+output G;
+output P;
+assign G=g[3]|(p[3]&g[2])|(p[3]&p[2]&g[1])|(p[3]&p[2]&p[1]&g[0]);
+assign P=p[3]&p[2]&p[1]&p[0];
+endmodule
+
+//a_in, b_in are input signal
+//c_in is the carry bit from up level
+//sum_out is the sum, c_out is the carry bit to next level
+module adder32(a_in,b_in,c_in,sum_out,c_out);
+input [31:0] a_in,b_in;
+input c_in;
+output [31:0] sum_out;
+output c_out;
+wire [6:0] G1,P1; //every 4 bits p, g from 1-28 bits
+wire [2:0] G2,P2; //equivalent G, P
+wire w0,w1,w2,w3,w4,w5,w6;
+
+cc4 //get G,P from every 4-bits from 1-28 bits
+    cc4_0(a_in[3:0],b_in[3:0],G1[0],P1[0]),
+    cc4_1(a_in[7:4],b_in[7:4],G1[1],P1[1]),
+    cc4_2(a_in[11:8],b_in[11:8],G1[2],P1[2]),
+    cc4_3(a_in[15:12],b_in[15:12],G1[3],P1[3]),
+    cc4_4(a_in[19:16],b_in[19:16],G1[4],P1[4]),
+    cc4_5(a_in[23:20],b_in[23:20],G1[5],P1[5]),
+    cc4_6(a_in[27:24],b_in[27:24],G1[6],P1[6]);
+
+ccc4 //use g, p from first 16 bits get equivalent G, P
+    ccc4_0(G1[3:0],P1[3:0],G2[0],P2[0]);
+
+ccc2 //use g, p from 17-24 bits get equivalent G, P
+    ccc2_0(G1[5:4],P1[5:4],G2[1],P2[1]);
+
+ccc3 //use g, p from 17-28 bits get equivalent G, P
+    ccc3_0(G1[6:4],P1[6:4],G2[2],P2[2]);
+
+add4
+   add1(a_in[3:0],b_in[3:0],c_in,sum_out[3:0],w0), //use CLA calcualte first 4-bits sum 
+   add2(a_in[7:4],b_in[7:4],w0,sum_out[7:4],w1),//use carry bit from first 4-bits to calculate 5-8 bits
+   add3(a_in[11:8],b_in[11:8],w1,sum_out[11:8],w2),//use carry bit from 5-8 bits to calculate 9-12 bits
+
+   //use carry bit from 5-8 bits and equivalent G, P from 9-12 bits to calculate sum of 13-16 bits
+   add4(a_in[15:12],b_in[15:12],G1[2]+P1[2]*w1,sum_out[15:12],w3),
+
+   //use 1-16 bits equivalent G, P get carry bits 
+   add5(a_in[19:16],b_in[19:16],G2[0]+P2[0]*c_in,sum_out[19:16],w4),
+
+   //use carry bit from 1-16 bits and equivalent G, P from 17-20 bits to calculate sum of 21-24 bits
+   add6(a_in[23:20],b_in[23:20],G1[4]+P1[4]*(G2[0]+P2[0]*c_in),sum_out[23:20],w5),
+
+   //use carry bit from 1-16 bits and equivalent G, P from 17-24 bits to calculate sum of 25-28 bits
+   add7(a_in[27:24],b_in[27:24],G2[1]+P2[1]*(G2[0]+P2[0]*c_in),sum_out[27:24],w6),
+
+   //use carry bit from 1-16 bits and equivalent G, P from 17-28 bits to calculate sum of 29-32 bits
+   add8(a_in[31:28],b_in[31:28],G2[2]+P2[2]*(G2[0]+P2[0]*c_in),sum_out[31:28],c_out);
+  
+endmodule
+
+
+2，	仿真代码设计及仿真报告及结果
+1)	仿真环境搭建，test case编写
+2)	仿真测试、调教代码
+3)	解读仿真结果及波形，完成仿真报告。
+4)	利用脚本实现仿真结果的数据化输出，方便仿真结果的检测。
+
+Testbench文件如下：
+//-----------------------------------------------------------
+// FileName: adder32_tb_random.v
+//-----------------------------------------------------------
+
+module adder32_tb_random;
+
+  reg  [31:0] ain;
+  reg  [31:0] bin; 
+  reg  [0 :0] cin; // drive the input port with the reg type
+  wire [31:0] sumout;
+  wire        cout; // sample the output port with the wire type
+
+  adder32 u_adder32(
+     .a_in     (ain),
+     .b_in     (bin),
+     .c_in     (cin),   
+     .sum_out  (sumout),
+     .c_out    (cout)   
+  );
+
+
+  parameter CLK_PERIOD = 20;
+  reg clk, reset_n; // reset_n : active low
+
+  initial begin
+    clk = 0;
+    forever begin
+      #(CLK_PERIOD/2) clk = ~clk;
+    end
+  end
+
+  initial begin
+    reset_n = 0;
+    #100 
+    reset_n = 1;
+  end
+
+  //// question1: is it enough stimulus to verify this adder32?
+  //// how many stimulus patterns we need to verify the adder32 completely?
+  //initial begin
+  //  #110 ain = 0;
+  //       bin = 0;
+  //       cin = 0;
+  //  #20  ain = 1;
+  //       bin = 0;
+  //       cin = 0;
+  //  #20  ain = 1;
+  //       bin = 1;
+  //       cin = 0;
+  //  #20  ain = 1;
+  //       bin = 1;
+  //       cin = 1;
+  //  #50  $finish; // here is a system task which can stop the simualtion 
+  //end
+
+  // solution1: random stimulus to check the adder32
+  // we can use the $random system task to generate the stimulus
+  // but how to generate the seed?
+  // 1. generate the SEED with shell command "date +%s/+%N" in the Makefile
+  // 2. trasfer the SEED in the compile command line with the option "+plusargs_save +seed=`data +%N"
+  // 3. get the seed in the below code
+  integer seed;
+  initial begin
+    if(!$value$plusargs("seed=%d",seed)) begin
+      seed = 100;
+    end else begin
+      $display("Random function with the SEED=%d", seed);
+    end
+  end 
+
+  reg [32:0] adder_sum; // used for smart checker
+  always @(negedge clk) begin
+    if (~reset_n) begin
+      ain = 0;
+      bin = 0;
+      cin = 0;
+    end else begin
+      // question 1 : Is the seed different every simulation ? => check the log 
+      // question 2 : Are the ain/bin/cin same every clock cycle? => check the log
+      // question 3 : if there is an error during one simulation, how to regenerate the same error
+      //              with the random seed?  => make run SEED=error_seed
+      // question 4 : are the ain/bin/cin sequence same with the same random seed? => compare the two
+      //              sim log file
+      ain = $random(seed); // $urandom returns a unsigned 32-bit random number
+      bin = $random(seed);
+      cin = $random(seed);
+      adder_sum = ain + bin + cin; // expected results
+      $display ("%0t:adder_sum=%0d, ain=%0d, bin=%0d, cin=%0d", $time, adder_sum, ain, bin, cin);
+    end
+  end
+
+  // watch dog
+  // question: how to setup clock cycles for simualtion?
+  integer cycle_num;
+  initial begin
+    if(!$value$plusargs("cycle_num=%d",cycle_num)) begin
+      cycle_num=10;
+      $display("Simulation time is %0d cycles", cycle_num);
+    end else begin
+      $display("Simulation time is %0d cycles", cycle_num);
+    end
+  
+    repeat(cycle_num) @ (posedge clk);
+
+    #200 $finish;
+  end
+
+  // questation2: Is the checker smart to check?
+  /* --- stupid checker start -----------------
+  always @ (posedge clk) begin
+    if (!reset_n) begin
+      $display("%t:%m: resetting ...",$time); // counter 5 clock
+    end
+    else begin
+      $display("%t:%m: resetting finish!", $time); // the 6th clock
+    end
+  end
+
+  initial begin
+    #115 if ({cout,sumout} != 2'b00) $display("Error: {cout,sumout}=%b,ain=%b, bin=%b, cin=%b",{cout,sumout}, ain, bin, cin);
+    #20  if ({cout,sumout} != 2'b01) $display("Error: {cout,sumout}=%b,ain=%b, bin=%b, cin=%b",{cout,sumout}, ain, bin, cin);
+    #20  if ({cout,sumout} != 2'b10) $display("Error: {cout,sumout}=%b,ain=%b, bin=%b, cin=%b",{cout,sumout}, ain, bin, cin);
+    #20  if ({cout,sumout} != 2'b11) $display("Error: {cout,sumout}=%b,ain=%b, bin=%b, cin=%b",{cout,sumout}, ain, bin, cin);
+  end
+  --- stupid checker end ---------------*/
+
+  // smart checker 
+  always @(posedge clk) begin
+    if (!reset_n) begin
+      $display("%0t:%m: Resetting....",$time);
+    end else begin
+      if (adder_sum != {cout,sumout}) begin
+        $display("ERROR: %0t:%m: adder_sum=%d, {cout,sumout}=%d", $time, adder_sum, {cout, sumout});
+      end
+    end
+  end
+
+  initial begin
+    $vcdpluson; 
+  end
+endmodule
+
+Makefile文件如下：
+
+# Makefile for simulate the adder32.v
+# Question 1. how to generate the random number?
+# Solution 1. random seed generation
+SEED = $(shell date +%s)
+
+CYCLE_NUM = 200
+# variable definition
+#DUT = ../../../design/verilog/adder32.v 
+DUT = ./adder32.v 
+#TB  =./adder32_tb.v ./timescale.v
+TB  = ./adder32_tb_random.v 
+
+# -------- run the simualtion throught the common methods --------
+run: compile simulate
+
+compile:
+	vcs -timescale=1/1 +v2k -debug_all $(DUT) $(TB) -l com_$(SEED).log
+
+simulate:
+	./simv +plusargs_save +seed=$(SEED) +cycle_num=$(CYCLE_NUM) -l sim_$(SEED).log
+
+run_dve:
+	dve -vpd vcdplus.vpd &
+
+clean:
+	rm -rf *.log csrc simv* *.vpd DVEfiles coverage *.vdb
+
+# -------- coverage driven strategy-------------------------------
+run_cov: compile_coverage simulate_coverage
+
+compile_coverage:
+	vcs -debug_all -cm line+cond+fsm+tgl+branch -lca $(DUT) $(TB) -l com_$(SEED).log
+
+simulate_coverage:
+	./simv +plusargs_save +seed=$(SEED) +cycle_num=$(CYCLE_NUM) -cm line+cond+fsm+tgl+branch -lca -cm_log \
+		cm_$(SEED).log -l sim_$(SEED).log
+
+report_cov:
+	urg -dir simv.vdb -format both -report coverage
+
+dve_cov:
+	dve -cov -covdir simv.vdb -lca
+
+clean:
+	@-rm -rf *.log  csrc simv simv.daidir ucli.key DVEfiles *vpd simv.vdb coverage *.bak *.help
+
+3，	期中题目汇报文档
+1)	仿真报告
+2)	源代码
+3)	仿真代码
+4)	Makefile脚本文件
+
+实验截图如下：
+ 
+ 
+ 
