@@ -1,0 +1,15 @@
+5.	逻辑上定义电源和地：
+derive_pg_connection -power_net VDD -power_pin VDD -ground_net VSS -ground_pin VSS
+derive_pg_connection -power_net VDDO -power_pin VDDO -ground_net VSSO -ground_pin VSSO
+derive_pg_connection -power_net VDDQ -power_pin VDDQ -ground_net VSSQ -ground_pin VSSQ
+derive_pg_connection -power_net VDD -ground_net VSS -tie
+
+6.	读取约束文件并检查时序
+read_sdc $sdc_file
+check_timing > ./reports/check_timing.rpt
+
+7.	设置一些时序优化变量 常见的变化设置如下
+source scripts/opt_ctrl.tcl
+
+8.	布局规划，读入 def 文件
+icc_shell>read_def design_data/RISC_CHIP.def
