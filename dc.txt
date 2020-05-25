@@ -1,0 +1,103 @@
+########################################################################
+# TCL script for DC to synthesize #
+########################################################################
+set hdlin_translate_off_skip_text "true" #关闭translate on/off语句之间的语法检查
+set verilogout_no_tri "true" #禁止综合结果生成三态门
+set default_schematic_options "-size infinite" #Schematic在一单独page上显示
+set write_name_nets_same_as_ports "true" #设置端口Port和管脚Pin的命名相同
+# dc_shell TcL startup script:
+set designer "Elvis"
+set company "SUS TECH"
+########################################################################
+### 1. setup design files path ###
+########################################################################
+#set proj_path /mnt/hgfs/win_linux-2/2019/Work/proj_full_adder
+set proj_path /home/ASIC/asic20/Work/proj_risc8 #定义proj_path变量
+set work_path $proj_path/dc #定义work_path变量
+set rtl_path $proj_path/rtl #定义rtl文件所在文件夹rtl_path
+set lib_path $proj_path/lib #定义lib_path
+set search_path "$search_path $work_path $rtl_path $lib_path"
+#设置调库时搜索路径
+set design_name risc8 #设置顶层设计
+set_app_var target_library sc_max.db
+#target_library 为综合的目标库，它一般是由生产线提供的工艺相关的库
+set_app_var link_library "* sc_max.db"
+# link_library 是链接库，它是 DC 在解释综合后网表时用来参考的库。一般情况下，它和目标库相同
+# “*”表示文件中所有的库
+set_app_var symbol_library tsmc090.sdb #设置symbol_library符号库
+### set svf file for formality ###
+set_svf $work_path/outputs/$design_name.svf #生成svf文件可用于Formality
+########################################################################
+### 2. read in verilog code ###
+########################################################################
+set_operating_conditions typical #设置典型环境约束
+set_wire_load_model -name "tsmc090_wl10" [all_designs] #设置线载模型
+set_fix_multiple_port_nets -all -buffer_constants
+set_drive 5.0 [all_inputs]
+#Resistance values on the specified input and inout ports.设置输入的负载(单位为之前设置的wire
+load)
+set_load 1.0 [all_outputs]
+#Sets the load attribute on the specified ports and nets.设施端口或节点输出的负载
+set_max_fanout 5 [all_inputs]
+#设置最大扇出
+set_max_transition 2.0 $design_name
+#设置最大transition time
+set_max_fanout 20 $design_name
+#设置最大扇出
+set_max_area 5000 #设置最大面积
+set_max_delay 0.5 -to [all_outputs] #设置最大延时
+create_clock -period 10 -name host_clk [get_ports clk]
+#创建时钟将clk端口
+#设置面积约束及最大路径延时约束
+# No clock buffers allowed for regular logic paths.
+#set_dont_use [get_cells slow/CLKBUF*] #Mapping时去掉某些库元件
+#set_dont_use [get_cells slow/CLKINV*]
+#no low power cells
+#set_dont_use [get_cells slow/*XL]
+#no scan cells
+#set_dont_use [get_cells slow/SDFF*]
+#set_dont_use [get_cells slow/SEDFF*]
+#no negative_triggered cells
+#set_dont_use [get_cells slow/*DFFN*]
+# set dont touch cells
+# Drop into interactive mode for compile & optimize:
+compile
+#compile_ultra
+# ungroup -all -flatten
+# compile -map_effort high
+# Drop into interactive mode for compile & optimize:
+compile
+#compile_ultra
+# ungroup -all -flatten
+# compile -map_effort high
+########################################################################
+### 4. report design&lib information ###
+########################################################################
+check_design > "$work_path/reports/$design_name.check"
+#输出综合结果报告文件
+report_area > $work_path/reports/$design_name.area
+report_power > $work_path/reports/$design_name.power
+report_timing > $work_path/reports/$design_name.timing
+report_timing -loops >> $work_path/reports/$design_name.timing
+report_constraint > $work_path/reports/$design_name.rc
+report_constraint -verbose >> $work_path/reports/$design_name.rc
+report_constraint -all_violators > $work_path/reports/$design_name.violator
+########################################################################
+### 5. Write file for use in other tools ###
+########################################################################
+#write -format ddc -hierarchy -output "$work_path/output/$design_name.ddc"
+#write -format db -hierarchy -xg_force_db -output "$work_path/output/$design_name.db"
+#write -format db -hierarchy -output "$work_path/output/$design_name.db"
+write -format verilog -hierarchy -output "$work_path/outputs/$design_name.v"
+write_sdf -version 2.1 "$work_path/outputs/$design_name.sdf"
+#生成.sdf/.f标准延时格式和标准网表格式文件，可用于后仿真
+#write_parasitics -format reduced -output "$work_path/output/$design_name.spef"
+write_sdf "$work_path/outputs/$design_name.sdf"
+write_sdc "$work_path/outputs/$design_name.sdc"
+#生成.sdc标注延时约束文件
+write -f ddc -hierarchy -output "$work_path/outputs/$design_name.ddc"
+#将综合仿真结果存如ddc文件
+# Quit DC:
+exit
+sh date >> $work_path/outputs/$design_name.date
+#remove_design -all
